@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ConfigBinder.Demo/ConfigBinder.Demo.csproj" />
+  <Project Path="ConfigBinder/ConfigBinder.csproj" />
+</Solution>
