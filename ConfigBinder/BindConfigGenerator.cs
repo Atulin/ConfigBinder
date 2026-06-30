@@ -1,6 +1,8 @@
 ﻿using System.Collections.Immutable;
+using System.Linq;
 using System.Text;
 using System.Threading;
+using ConfigBinder.Helpers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
@@ -26,9 +28,10 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterPostInitializationOutput(static ctx =>
-            ctx.AddSource("BindConfigAttribute.g.cs",
-                SourceText.From(AttributeSource, Encoding.UTF8)));
+        context.RegisterPostInitializationOutput(static ctx => {
+	        ctx.AddSource("BindConfigAttribute.g.cs", SourceText.From(AttributeSource, Encoding.UTF8));
+	        ctx.AddSource("ConfigBinderOptionsFactory.g.cs", SourceText.From(FactorySource, Encoding.UTF8));
+        });
         
         var models = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -68,10 +71,27 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
             return null;
         }
 
+        var members = symbol.GetMembers();
+        
+        var allProps = members
+	        .OfType<IPropertySymbol>()
+	        .Select(static p => p.Name)
+	        .ToEquatableReadOnlyList();
+        
+        var requiredProps = members
+	        .OfType<IPropertySymbol>()
+	        .Where(static p => p.IsRequired)
+	        .Select(static p => p.Name)
+	        .ToEquatableReadOnlyList();
+
         return new ConfigModel(
             FullyQualifiedName: symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            Namespace: symbol.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             TypeName: symbol.Name,
-            SectionName: sectionName);
+            Visibility: symbol.DeclaredAccessibility.ToString(),
+            SectionName: sectionName,
+            Properties: allProps,
+            RequiredProperties: requiredProps);
     }
 
     private static void Emit(
@@ -96,40 +116,73 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
     }
 
 
-    private static string RenderValidator(ConfigModel m) => $$"""
-        {{Header}}
-        #nullable enable
+    private static string RenderValidator(ConfigModel m)
+    {
+	    var sb = new StringBuilder();
+	    foreach (var prop in m.RequiredProperties)
+	    {
+		    sb.AppendLine($"\t\tif (options.{prop} == null)");
+		    sb.AppendLine("\t\t{");
+		    sb.AppendLine($"""			failures.Add("The required property '{prop}' is missing or null.");""");
+		    sb.AppendLine("\t\t}");
+		    sb.AppendLine();
+	    }
+	    
+	    return // lang=cs 
+		    $$"""
+            {{Header}}
+            #nullable enable
 
-        namespace ConfigBinder.Generated;
+            namespace ConfigBinder.Generated;
 
-        internal sealed class {{m.SafeName}}Validator : global::Microsoft.Extensions.Options.IValidateOptions<{{m.FullyQualifiedName}}>
-        {
-            public global::Microsoft.Extensions.Options.ValidateOptionsResult Validate(
-                string? name, {{m.FullyQualifiedName}} options)
+            internal sealed class {{m.SafeName}}Validator : global::Microsoft.Extensions.Options.IValidateOptions<{{m.FullyQualifiedName}}>
             {
-                var results = new global::System.Collections.Generic.List<global::System.ComponentModel.DataAnnotations.ValidationResult>();
-
-                var valid = global::System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
-                    options,
-                    new global::System.ComponentModel.DataAnnotations.ValidationContext(options),
-                    results,
-                    validateAllProperties: true);
-
-                if (valid)
+                public global::Microsoft.Extensions.Options.ValidateOptionsResult Validate(string? name, {{m.FullyQualifiedName}} options)
                 {
-                    return global::Microsoft.Extensions.Options.ValidateOptionsResult.Success;
-                }
+            		var failures = new global::System.Collections.Generic.List<string>();
+            
+            {{sb}}
+                    var results = new global::System.Collections.Generic.List<global::System.ComponentModel.DataAnnotations.ValidationResult>();
 
-                var failures = new global::System.Collections.Generic.List<string>(results.Count);
-                foreach (var r in results)
-                {
-                    failures.Add(r.ErrorMessage ?? "Unknown validation error.");
-                }
+                    var valid = global::System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+                        options,
+                        new global::System.ComponentModel.DataAnnotations.ValidationContext(options),
+                        results,
+                        validateAllProperties: true);
 
-                return global::Microsoft.Extensions.Options.ValidateOptionsResult.Fail(failures);
+                    if (valid)
+                    {
+                        return global::Microsoft.Extensions.Options.ValidateOptionsResult.Success;
+                    }
+                    foreach (var r in results)
+                    {
+                        failures.Add(r.ErrorMessage ?? "Unknown validation error.");
+                    }
+
+                    return global::Microsoft.Extensions.Options.ValidateOptionsResult.Fail(failures);
+                }
             }
-        }
-        """;
+            """;
+    }
+
+    private static string RenderPartial(ConfigModel m)
+    {
+		return // lang=cs
+			$$"""
+			{{Header}}
+			#nullable enable
+			
+			namespace {{m.Namespace}};
+			
+			{{m.Visibility}} partial class {{m.TypeName}}
+			{
+				public {{m.TypeName}}(global::Microsoft.Extensions.Configuration.IConfigurationSection section)
+				{
+					if (section is null) throw new ArgumentNullException(nameof(section));
+				}
+			}
+			""";
+    }
 
     private static string RenderExtensions(ImmutableArray<ConfigModel> models)
     {
@@ -173,7 +226,8 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    private const string AttributeSource = $$"""
+    private const string AttributeSource = // lang=cs
+	    $$"""
         {{Header}}
         #nullable enable
 
@@ -203,4 +257,31 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
             public BindConfigAttribute(string sectionName) => SectionName = sectionName;
         }
         """;
+
+    private const string FactorySource = // lang=cs
+		$$"""
+		{{Header}}
+		
+		#nullable enable
+		
+		namespace ConfigBinder;
+		
+		internal sealed class ConfigBinderOptionsFactory<[global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> : global::Microsoft.Extensions.Options.OptionsFactory<T>
+			where T : class
+		{
+			private readonly global::System.Func<string, T> _factory;
+		
+			public ConfigBinderOptionsFactory(
+				global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IConfigureOptions<T>> setups,
+				global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IPostConfigureOptions<T>> postConfigures,
+				global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IValidateOptions<T>> validations,
+				global::System.Func<string, T> factory)
+				: base(setups, postConfigures, validations)
+			{
+				_factory = factory;	
+			}
+			
+			protected override T CreateInstance(string name) => _factory(name);
+		}
+		""";
 }
