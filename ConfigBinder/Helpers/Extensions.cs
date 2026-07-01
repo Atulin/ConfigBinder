@@ -17,19 +17,18 @@ public static class Extensions
 	}
 
 	public static bool Equals(
-		this ISymbol symbol, 
-		string typeName, 
-		string namespaceName, 
-		StringComparison comparison = StringComparison.OrdinalIgnoreCase)
+		this ISymbol? symbol, 
+		params ReadOnlySpan<string> name)
 	{
-		if (!symbol.Name.Equals(typeName, comparison))
+		if (symbol is null)
 		{
 			return false;
 		}
-		if (!(symbol.ContainingNamespace?.ToDisplayString().Equals(namespaceName, comparison) ?? false))
+
+		return name switch
 		{
-			return false;
-		}
-		return true;
+			[.. var rest, var last] => symbol.Name == last && symbol.ContainingNamespace.Equals(rest),
+			[] => symbol is INamespaceSymbol { IsGlobalNamespace: true }
+		};
 	}
 }

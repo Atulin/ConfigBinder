@@ -71,7 +71,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 	{
 		var attr = compilation.Assembly
 			.GetAttributes()
-			.FirstOrDefault(a => a.AttributeClass?.Equals(nameof(AttributeSources.ConfigSectionDefaultsAttribute), AttributeSources.AttributesNamespace) ?? false);
+			.FirstOrDefault(a => a.AttributeClass.Equals(SharedSources.BaseNamespace, AttributeSources.Namespace, nameof(AttributeSources.ConfigSectionDefaultsAttribute)));
 
 		var mode = RegistrationMode.Options;
 
@@ -154,7 +154,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		}
 
 		var implementsIvt = symbol.AllInterfaces
-			.Any(i => i.OriginalDefinition.Equals("IValidationTarget", "Immediate.Validations.Shared"));
+			.Any(i => i.OriginalDefinition.Equals("Immediate", "Validations", "Shared", "IValidationTarget"));
 
 		var properties = new List<PropertyModel>();
 
@@ -167,7 +167,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
 			PropConverterRef? propConverter = null;
 			var converterAttr = member.GetAttributes()
-				.FirstOrDefault(a => a.AttributeClass?.Equals(nameof(AttributeSources.ConfigConverterAttribute), AttributeSources.AttributesNamespace) ?? false);
+				.FirstOrDefault(a => a.AttributeClass.Equals(SharedSources.BaseNamespace, AttributeSources.Namespace, nameof(AttributeSources.ConfigConverterAttribute)));
 
 			if (converterAttr?.ConstructorArguments.Length >= 1)
 			{
@@ -192,7 +192,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				PerPropConverter: propConverter));
 
 		}
-		
+
 		return new ConfigModel(
 			Namespace: symbol.ContainingNamespace.IsGlobalNamespace ? null : symbol.ContainingNamespace.ToDisplayString(),
 			TypeName: symbol.Name,
@@ -504,7 +504,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				continue;
 			}
 
-			var capitalized = $"{char.ToUpper(name[0])}{name.Substring(1)}";
+			var capitalized = $"{char.ToUpper(name[0])}{name[1..]}";
 
 			w.WriteLine( // lang=cs
 				$$"""
@@ -542,7 +542,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		w.WriteLine(SharedSources.Header);
 		w.WriteLine("#nullable enable");
 		w.WriteLine();
-		w.WriteLine("namespace ConfigBinder;");
+		w.WriteLine($"namespace {SharedSources.BaseNamespace};");
 		w.WriteLine();
 		w.WriteLine("public static class GeneratedConfigRegistration");
 		w.BodyBlock(() => {

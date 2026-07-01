@@ -2,7 +2,7 @@
 
 public static class RuntimeHelpersSources
 {
-	public const string RuntimeHelpersNamespace = "ConfigBinder.RuntimeHelpers";
+	public const string RuntimeHelpersNamespace = $"{SharedSources.BaseNamespace}.RuntimeHelpers";
 
 	public const string ConfigBinderOptionsFactory = // lang=cs
 		$$"""

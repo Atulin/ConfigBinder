@@ -2,6 +2,8 @@
 
 internal static class SharedSources
 {
+	public const string BaseNamespace = "ConfigBinder";
+	
 	public const string Header = // lang=cs
 		$"""
 		 //----------------------------------------------------------------------------

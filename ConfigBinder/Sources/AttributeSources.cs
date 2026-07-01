@@ -2,7 +2,9 @@
 
 public static class AttributeSources
 {
-	public const string AttributesNamespace = "ConfigBinder.Attributes";
+	public const string Namespace = "Attributes";
+	
+	public const string AttributesNamespace = $"{SharedSources.BaseNamespace}.Attributes";
 
 	public const string ConfigRegistrationMode = // lang=cs
 		$$"""
