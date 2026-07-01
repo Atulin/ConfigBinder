@@ -1,5 +1,8 @@
 # ConfigBinder
 
+[![NuGet](https://img.shields.io/nuget/v/Atulin.ConfigBinder.svg)](https://www.nuget.org/packages/Atulin.ConfigBinder)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **ConfigBinder** is a zero-reflection, highly-performant configuration binding library for .NET, 
 powered by Roslyn Source Generators. It allows you to bind strongly-typed configuration classes directly from `IConfiguration` 
 at compile time, completely eliminating the startup overhead and reflection cost associated with the built-in `Microsoft.Extensions.Configuration` binder.
