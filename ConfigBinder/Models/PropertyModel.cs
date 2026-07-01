@@ -26,4 +26,4 @@ internal sealed record PropertyModel(
 	bool IsNullable,
 	bool IsRequired,
 	ParseKind ParseKind,
-	ConverterRef? PerPropConverter);
+	PropConverterRef? PerPropConverter);

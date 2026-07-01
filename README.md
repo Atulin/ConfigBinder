@@ -3,9 +3,9 @@
 [![NuGet](https://img.shields.io/nuget/v/Atulin.ConfigBinder.svg)](https://www.nuget.org/packages/Atulin.ConfigBinder)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**ConfigBinder** is a zero-reflection, highly-performant configuration binding library for .NET, 
-powered by Roslyn Source Generators. It allows you to bind strongly-typed configuration classes directly from `IConfiguration` 
-at compile time, completely eliminating the startup overhead and reflection cost associated with the built-in `Microsoft.Extensions.Configuration` binder.
+**ConfigBinder** is a zero-reflection, highly performant configuration binding library for .NET, 
+powered by Roslyn Source Generators. It allows you to bind strongly typed configuration classes directly from `IConfiguration` 
+at compile time, eliminating the startup overhead and reflection cost associated with the built-in `Microsoft.Extensions.Configuration` binder.
 
 ## Features
 
@@ -45,7 +45,7 @@ public sealed class MyConfig
 
 ### 2. Register Generated Configurations
 
-In your `Program.cs` or startup code, simply call the generated extension method `RegisterGeneratedConfigs` on your `IServiceCollection`.
+In your `Program.cs` or startup code, call the generated extension method `RegisterGeneratedConfigs` on your `IServiceCollection`.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -122,5 +122,104 @@ public sealed partial class ValidatedConfig : IValidationTarget<ValidatedConfig>
 {
     public required string Host { get; init; }
     public required int Port { get; init; }
+}
+```
+
+## Example
+
+A config model like
+
+```csharp
+[Validate]
+[ConfigSection("Validated")]
+internal sealed partial class ValidatedConfig : IValidationTarget<ValidatedConfig>
+{
+	[MinLength(10)]
+	public required string Name { get; init; }
+	public required float Weight { get; init; }
+	public required DateTime BuildDate { get; init; }
+}
+```
+will generate the following binding code:
+
+```csharp
+internal static class ValidatedConfigConfigBinder
+{
+	public static ValidatedConfig Bind(IConfiguration configuration)
+	{
+		var section = configuration.GetSection("Validated");
+
+		var instance = new ValidatedConfig {
+			Name = ValidateString(section["Name"], "Name"),
+			Weight = ParseFloat(section["Weight"], "Weight"),
+			BuildDate = ParseIParsable<DateTime>(section["BuildDate"], "BuildDate"),
+		};
+
+		return instance;
+	}
+
+	private static string ValidateString(string? value, string propertyName)
+	{
+		if (string.IsNullOrEmpty(value))
+	    {
+			throw Required(propertyName);
+	    }
+		return value;
+	}
+    
+	private static T ParseIParsable<T>(string? value, string propertyName) where T : IParsable<T>
+	{
+		if (string.IsNullOrEmpty(value))
+	    {
+	        throw Required(propertyName);
+	    }
+	    if (T.TryParse(value, CultureInfo.InvariantCulture, out var t))
+	    {
+	     	return t;   
+	    }
+	    throw BadValue(propertyName, value, typeof(T).Name);
+	}
+    
+	private static float ParseFloat(string? value, string propertyName)
+	{
+	    if (string.IsNullOrEmpty(value))
+	    {
+	        throw Required(propertyName);
+	    }
+	    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
+	    {
+	     	return n;   
+	    }
+	    throw BadValue(propertyName, value, "float");
+	}
+    
+	private static InvalidOperationException Required(string key) =>
+		new($"Required configuration key '{key}' is missing or empty");
+	      
+	private static InvalidOperationException BadValue(string key, string? value, string type) =>
+		new($"Configuration key '{key}' value '{value}' cannot be parsed as '{type}'");
+}
+```
+and the following extension method:
+
+```csharp
+public static class GeneratedConfigRegistration
+{
+	public static IServiceCollection RegisterGeneratedConfigs(
+		this IServiceCollection services,
+		IConfiguration configuration)
+	{
+		services.AddOptions<ValidatedConfig>();
+		services.AddSingleton<IOptionsFactory<ValidatedConfig>>(sp => 
+			new ConfigBinderOptionsFactory<ValidatedConfig>(
+				sp.GetRequiredService<IEnumerable<IConfigureOptions<ValidatedConfig>>>(),
+				sp.GetRequiredService<IEnumerable<IPostConfigureOptions<ValidatedConfig>>>(),
+				sp.GetRequiredService<IEnumerable<IValidateOptions<ValidatedConfig>>>(),
+				_ => ValidatedConfigConfigBinder.Bind(configuration)));
+		services.AddSingleton<IValidateOptions<ValidatedConfig>, ImmediateValidationOptionsValidator<ValidatedConfig>>();
+		services.AddOptions<ValidatedConfig>().ValidateOnStart();
+
+		return services;
+	}
 }
 ```

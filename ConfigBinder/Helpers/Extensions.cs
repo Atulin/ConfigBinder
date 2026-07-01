@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
@@ -13,5 +14,22 @@ public static class Extensions
 	{
 		ctx.AddSource(fileName, SourceText.From(source, Encoding.UTF8));
 		return ctx;
+	}
+
+	public static bool Equals(
+		this ISymbol symbol, 
+		string typeName, 
+		string namespaceName, 
+		StringComparison comparison = StringComparison.OrdinalIgnoreCase)
+	{
+		if (!symbol.Name.Equals(typeName, comparison))
+		{
+			return false;
+		}
+		if (!(symbol.ContainingNamespace?.ToDisplayString().Equals(namespaceName, comparison) ?? false))
+		{
+			return false;
+		}
+		return true;
 	}
 }

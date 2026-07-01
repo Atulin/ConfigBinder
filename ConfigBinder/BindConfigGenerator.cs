@@ -16,8 +16,8 @@ namespace ConfigBinder;
 [Generator(LanguageNames.CSharp)]
 public sealed class BindConfigGenerator : IIncrementalGenerator
 {
-	private const string FullAttributeName = $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionAttribute)}";
-	private const string ValidationTargetFqn = "global::Immediate.Validations.Shared.IValidationTarget<T>";
+	private const string ConfigSectionAttrName = $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionAttribute)}";
+	private const string TypeConverterAttrName = $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigTypeConverterAttribute)}";
 
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
@@ -34,14 +34,22 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			context.CompilationProvider.Select(static (c, _) => ReadAssemblyDefaults(c));
 
 		var globalConverters =
-			context.CompilationProvider.Select(static (c, _) => ReadGlobalTypeConverters(c));
+			context.SyntaxProvider
+				.ForAttributeWithMetadataName(
+					TypeConverterAttrName,
+					predicate: static (node, _) => node is CompilationUnitSyntax,
+					transform: ReadGlobalTypeConverters
+				)
+				.Where(static m => m is not null)
+				.Select(static (m, _) => m!)
+				.Collect();
 
 		var hasIv = context.CompilationProvider
 			.Select(static (c, _) => c.GetTypeByMetadataName("Immediate.Validations.Shared.IValidationTarget`1") is not null);
 
 		var models = context.SyntaxProvider
 			.ForAttributeWithMetadataName(
-				FullAttributeName,
+				ConfigSectionAttrName,
 				predicate: static (node, _) => node is ClassDeclarationSyntax or RecordDeclarationSyntax or StructDeclarationSyntax,
 				transform: GetModel)
 			.Where(static m => m is not null)
@@ -63,7 +71,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 	{
 		var attr = compilation.Assembly
 			.GetAttributes()
-			.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionDefaultsAttribute)}");
+			.FirstOrDefault(a => a.AttributeClass?.Equals(nameof(AttributeSources.ConfigSectionDefaultsAttribute), AttributeSources.AttributesNamespace) ?? false);
 
 		var mode = RegistrationMode.Options;
 
@@ -83,34 +91,31 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		return new AssemblyDefaults(mode);
 	}
 
-	private static ImmutableDictionary<string, ConverterRef> ReadGlobalTypeConverters(Compilation compilation)
+	private static ConverterRef? ReadGlobalTypeConverters(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
 	{
-		var dict = ImmutableDictionary.CreateBuilder<string, ConverterRef>();
-
-		var attributes = compilation.Assembly
-			.GetAttributes()
-			.Where(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{AttributeSources.ConfigTypeConverterAttribute}");
-
-		foreach (var attr in attributes)
+		var attr = ctx.Attributes.FirstOrDefault();
+		if (attr is null)
 		{
-			if (attr.ConstructorArguments.Length < 2)
-			{
-				continue;
-			}
-
-			var targetFqn = (attr.ConstructorArguments[0].Value as INamedTypeSymbol)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-			var converterFqn = (attr.ConstructorArguments[1].Value as INamedTypeSymbol)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-			var methodName = attr.ConstructorArguments.Length >= 3
-				? attr.ConstructorArguments[2].Value as string ?? "Convert"
-				: "Convert";
-
-			if (targetFqn is not null && converterFqn is not null)
-			{
-				dict[targetFqn] = new ConverterRef(converterFqn, methodName);
-			}
+			return null;
 		}
 
-		return dict.ToImmutable();
+		if (attr.ConstructorArguments.Length < 2)
+		{
+			return null;
+		}
+
+		var targetFqn = (attr.ConstructorArguments[0].Value as INamedTypeSymbol)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+		var converterFqn = (attr.ConstructorArguments[1].Value as INamedTypeSymbol)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+		var methodName = attr.ConstructorArguments.Length >= 3
+			? attr.ConstructorArguments[2].Value as string ?? "Convert"
+			: "Convert";
+
+		if (targetFqn is not null && converterFqn is not null)
+		{
+			return new ConverterRef(targetFqn, converterFqn, methodName);
+		}
+
+		return null;
 	}
 
 	private static ConfigModel? GetModel(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
@@ -149,7 +154,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		}
 
 		var implementsIvt = symbol.AllInterfaces
-			.Any(i => i.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == ValidationTargetFqn);
+			.Any(i => i.OriginalDefinition.Equals("IValidationTarget", "Immediate.Validations.Shared"));
 
 		var properties = new List<PropertyModel>();
 
@@ -160,9 +165,9 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			if (member.IsStatic || member.IsIndexer) continue;
 			if (member.SetMethod?.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal)) continue;
 
-			ConverterRef? propConverter = null;
+			PropConverterRef? propConverter = null;
 			var converterAttr = member.GetAttributes()
-				.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigConverterAttribute)}");
+				.FirstOrDefault(a => a.AttributeClass?.Equals(nameof(AttributeSources.ConfigConverterAttribute), AttributeSources.AttributesNamespace) ?? false);
 
 			if (converterAttr?.ConstructorArguments.Length >= 1)
 			{
@@ -172,7 +177,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 					: "Convert";
 				if (convType is not null)
 				{
-					propConverter = new ConverterRef(convType, convMethod);
+					propConverter = new PropConverterRef(convType, convMethod);
 				}
 			}
 
@@ -187,7 +192,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				PerPropConverter: propConverter));
 
 		}
-
+		
 		return new ConfigModel(
 			Namespace: symbol.ContainingNamespace.IsGlobalNamespace ? null : symbol.ContainingNamespace.ToDisplayString(),
 			TypeName: symbol.Name,
@@ -233,7 +238,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		SourceProductionContext ctx,
 		ImmutableArray<ConfigModel> models,
 		AssemblyDefaults defaults,
-		ImmutableDictionary<string, ConverterRef> globalConverters,
+		ImmutableArray<ConverterRef> globalConverters,
 		bool hasIv)
 	{
 		if (models.IsEmpty)
@@ -256,7 +261,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				$"ConfigBinder.{model.SafeName}.g.cs",
 				SourceText.From(EmitBinder(model, globalConverters), Encoding.UTF8));
 		}
-		
+
 		ctx.AddSource(
 			"BindConfigRegistration.g.cs",
 			SourceText.From(EmitRegistration(models, defaults), Encoding.UTF8));
@@ -264,8 +269,18 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
 	private static string EmitBinder(
 		ConfigModel model,
-		ImmutableDictionary<string, ConverterRef> globalConverters)
+		ImmutableArray<ConverterRef> globalConverters)
 	{
+		var converters = globalConverters
+			.GroupBy(x => x.TargetFqn)
+			.ToImmutableDictionary(
+				static g => g.Key,
+				static g => {
+					var first = g.First();
+					return new PropConverterRef(first.ConverterTypeFqn, first.MethodName);
+				},
+				StringComparer.Ordinal);
+
 		var w = new IndentedWriter();
 
 		w.WriteLine(SharedSources.Header);
@@ -287,7 +302,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				w.InitBlock(() => {
 					foreach (var prop in model.Properties)
 					{
-						EmitPropertyAssignment(w, prop, ResolveConverter(prop, globalConverters));
+						EmitPropertyAssignment(w, prop, ResolveConverter(prop, converters));
 					}
 				});
 				w.WriteLine();
@@ -301,7 +316,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		return w.ToString();
 	}
 
-	private static void EmitPropertyAssignment(IndentedWriter w, PropertyModel prop, ConverterRef? converter)
+	private static void EmitPropertyAssignment(IndentedWriter w, PropertyModel prop, PropConverterRef? converter)
 	{
 		var raw = $"""section["{prop.Name}"]""";
 
@@ -350,9 +365,9 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			_ => $"""ParseIParsable<{prop.TypeFqn}>({varExpr}, "{prop.Name}")""",
 		};
 
-	private static ConverterRef? ResolveConverter(
+	private static PropConverterRef? ResolveConverter(
 		PropertyModel prop,
-		ImmutableDictionary<string, ConverterRef> globalConverters)
+		ImmutableDictionary<string, PropConverterRef> globalConverters)
 	{
 		if (prop.PerPropConverter is not null)
 		{
@@ -388,6 +403,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 					return value;
 				}
 				""");
+			w.WriteLine();
 		}
 		if (set.Contains(ParseKind.Bool))
 		{
@@ -406,6 +422,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				    throw BadValue(propertyName, value, "Boolean");
 				}
 				""");
+			w.WriteLine();
 		}
 		if (set.Contains(ParseKind.Char))
 		{
@@ -424,6 +441,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				    throw BadValue(propertyName, value, "Char");
 				}
 				""");
+			w.WriteLine();
 		}
 		if (set.Contains(ParseKind.Enum))
 		{
@@ -442,6 +460,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				    throw BadValue(propertyName, value, typeof(TEnum).Name);
 				}
 				""");
+			w.WriteLine();
 		}
 		if (set.Contains(ParseKind.Parsable))
 		{
@@ -460,6 +479,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				    throw BadValue(propertyName, value, typeof(T).Name);
 				}
 				""");
+			w.WriteLine();
 		}
 
 		var numerics = new[]
@@ -476,7 +496,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			(ParseKind.Double, "double", "Float"),
 			(ParseKind.Decimal, "decimal", "Number"),
 		};
-		
+
 		foreach (var (kind, name, style) in numerics)
 		{
 			if (!set.Contains(kind))
@@ -501,6 +521,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				      throw BadValue(propertyName, value, "{{name}}");
 				  }
 				  """);
+			w.WriteLine();
 		}
 
 		// Shared error factories
@@ -569,7 +590,6 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			? $"{model.Namespace}.{model.SafeName}ConfigBinder"
 			: $"{model.SafeName}ConfigBinder";
 
-		w.WriteLine($"services.AddOptions<{model.FullyQualifiedName}>();");
 		w.WriteLine($"services.AddSingleton<global::Microsoft.Extensions.Options.IOptionsFactory<{model.FullyQualifiedName}>>(sp => ");
 		w.Indented(() => {
 			w.WriteLine($"new global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{nameof(RuntimeHelpersSources.ConfigBinderOptionsFactory)}<{model.FullyQualifiedName}>(");
