@@ -209,7 +209,6 @@ public static class GeneratedConfigRegistration
 		this IServiceCollection services,
 		IConfiguration configuration)
 	{
-		services.AddOptions<ValidatedConfig>();
 		services.AddSingleton<IOptionsFactory<ValidatedConfig>>(sp => 
 			new ConfigBinderOptionsFactory<ValidatedConfig>(
 				sp.GetRequiredService<IEnumerable<IConfigureOptions<ValidatedConfig>>>(),
