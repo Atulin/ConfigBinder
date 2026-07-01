@@ -10,7 +10,7 @@ internal sealed record ConfigModel(
 	EquatableReadOnlyList<PropertyModel> Properties,
 	bool ImplementsIValidationTarget,
 	RegistrationMode? ModeOverride
-	)
+)
 {
 	public string SafeName => FullyQualifiedName
 		.Replace("global::", "")

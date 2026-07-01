@@ -17,7 +17,7 @@ namespace ConfigBinder;
 public sealed class BindConfigGenerator : IIncrementalGenerator
 {
 	private const string FullAttributeName = $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionAttribute)}";
-	private const string ValidationTargetFqn = "Immediate.Validations.Shared.IValidationTarget`1";
+	private const string ValidationTargetFqn = "global::Immediate.Validations.Shared.IValidationTarget<T>";
 
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
@@ -63,9 +63,9 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 	{
 		var attr = compilation.Assembly
 			.GetAttributes()
-			.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{AttributeSources.ConfigSectionDefaultsAttribute}");
+			.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionDefaultsAttribute)}");
 
-		var mode = RegistrationMode.DirectAccess;
+		var mode = RegistrationMode.Options;
 
 		if (attr is null)
 		{
@@ -149,7 +149,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		}
 
 		var implementsIvt = symbol.AllInterfaces
-			.Any(i => i.OriginalDefinition.ToDisplayString() == ValidationTargetFqn);
+			.Any(i => i.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == ValidationTargetFqn);
 
 		var properties = new List<PropertyModel>();
 
@@ -162,7 +162,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
 			ConverterRef? propConverter = null;
 			var converterAttr = member.GetAttributes()
-				.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{AttributeSources.ConfigConverterAttribute}");
+				.FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigConverterAttribute)}");
 
 			if (converterAttr?.ConstructorArguments.Length >= 1)
 			{
@@ -256,7 +256,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				$"ConfigBinder.{model.SafeName}.g.cs",
 				SourceText.From(EmitBinder(model, globalConverters), Encoding.UTF8));
 		}
-
+		
 		ctx.AddSource(
 			"BindConfigRegistration.g.cs",
 			SourceText.From(EmitRegistration(models, defaults), Encoding.UTF8));
@@ -572,19 +572,19 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		w.WriteLine($"services.AddOptions<{model.FullyQualifiedName}>();");
 		w.WriteLine($"services.AddSingleton<global::Microsoft.Extensions.Options.IOptionsFactory<{model.FullyQualifiedName}>>(sp => ");
 		w.Indented(() => {
-			w.WriteLine($"new global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{RuntimeHelpersSources.ConfigBinderOptionsFactory}<{model.FullyQualifiedName}>(");
+			w.WriteLine($"new global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{nameof(RuntimeHelpersSources.ConfigBinderOptionsFactory)}<{model.FullyQualifiedName}>(");
 			w.Indented(() => {
 				w.WriteLine($"sp.GetRequiredService<global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IConfigureOptions<{model.FullyQualifiedName}>>>(),");
 				w.WriteLine($"sp.GetRequiredService<global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IPostConfigureOptions<{model.FullyQualifiedName}>>>(),");
 				w.WriteLine($"sp.GetRequiredService<global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IValidateOptions<{model.FullyQualifiedName}>>>(),");
-				w.WriteLine($"_ => {binder}.Bind(configuration));");
+				w.WriteLine($"_ => {binder}.Bind(configuration)));");
 			});
 		});
 
 		if (model.ImplementsIValidationTarget)
 		{
 			w.Write($"services.AddSingleton<global::Microsoft.Extensions.Options.IValidateOptions<{model.FullyQualifiedName}>, ");
-			w.WriteLine($"global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{RuntimeHelpersSources.ImmediateValidationOptionsValidator}<{model.FullyQualifiedName}>>();");
+			w.WriteLine($"global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{nameof(RuntimeHelpersSources.ImmediateValidationOptionsValidator)}<{model.FullyQualifiedName}>>();");
 		}
 
 		w.WriteLine($"services.AddOptions<{model.FullyQualifiedName}>().ValidateOnStart();");

@@ -51,7 +51,7 @@ public static class AttributeSources
 		      /// When null, inherits from <see cref="ConfigSectionDefaultsAttribute"/> or
 		      /// defaults to <see cref="ConfigRegistrationMode.DirectAccess"/>.
 		      /// </summary>
-		      public ConfigRegistrationMode Mode { get; set; } = ConfigRegistrationMode.DirectAccess;
+		      public ConfigRegistrationMode Mode { get; set; } = ConfigRegistrationMode.Options;
 		  }
 		  """;
 	
@@ -113,7 +113,7 @@ public static class AttributeSources
 		  [global::System.AttributeUsage(global::System.AttributeTargets.Assembly, Inherited = false)]
 		  public sealed class {{nameof(ConfigSectionDefaultsAttribute)}} : global::System.Attribute
 		  {
-		      public ConfigRegistrationMode Mode { get; set; } = ConfigRegistrationMode.DirectAccess;
+		      public ConfigRegistrationMode Mode { get; set; } = ConfigRegistrationMode.Options;
 		  }
 		  """;
 }

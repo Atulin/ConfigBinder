@@ -3,11 +3,15 @@ using ConfigBinder;
 using ConfigBinder.Attributes;
 using Immediate.Validations.Shared;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration["SomeConfig:SomeString"] = "Hello World!";
 builder.Configuration["SomeConfig:SomeInt"] = "42";
+builder.Configuration["Validated:Name"] = "Validated Config";
+builder.Configuration["Validated:Weight"] = "67.69";
+builder.Configuration["Validated:BuildDate"] = "2026-07-01 04:07:11";
 
 builder.Services.Replace(ServiceDescriptor.Singleton(() => new SomeConfig{ SomeString = "", SomeInt = 0 }));
 
@@ -16,14 +20,14 @@ builder.Services.RegisterGeneratedConfigs(builder.Configuration);
 var app = builder.Build();
 
 var cfg = app.Services.GetRequiredService<SomeConfig>();
-var val = app.Services.GetRequiredService<ValidatedConfig>();
+var val = app.Services.GetRequiredService<IOptions<ValidatedConfig>>();
 
 Console.WriteLine(JsonSerializer.Serialize(cfg));
-Console.WriteLine(JsonSerializer.Serialize(val));
+Console.WriteLine(JsonSerializer.Serialize(val.Value));
 
 return;
 	
-[ConfigSection("SomeConfig")]
+[ConfigSection("SomeConfig", Mode = ConfigRegistrationMode.DirectAccess)]
 internal sealed class SomeConfig
 {
 	public required string SomeString { get; init; }
@@ -34,6 +38,7 @@ internal sealed class SomeConfig
 [ConfigSection("Validated")]
 internal sealed partial class ValidatedConfig : IValidationTarget<ValidatedConfig>
 {
+	[MinLength(10)]
 	public required string Name { get; init; }
 	public required float Weight { get; init; }
 	public required DateTime BuildDate { get; init; }
