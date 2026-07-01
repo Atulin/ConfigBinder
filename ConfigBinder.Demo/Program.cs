@@ -9,7 +9,6 @@ builder.Configuration["SomeConfig:SomeInt"] = "42";
 
 builder.Services.Replace(ServiceDescriptor.Singleton(() => new SomeConfig{ SomeString = "", SomeInt = 0 }));
 
-
 return;
 	
 [ConfigSection("SomeConfig")]

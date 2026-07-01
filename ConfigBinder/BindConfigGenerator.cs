@@ -518,7 +518,19 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				{
 					var mode = model.ModeOverride ?? defaults.Mode;
 					w.WriteLine($"""// {model.FullyQualifiedName} → "{model.SectionName}" [{mode}]""");
+
+					if (mode == RegistrationMode.DirectAccess)
+					{
+						EmitDirectRegistration(w, model);
+					}
+					else
+					{
+						EmitOptionsRegistration(w, model);
+					}
+					w.WriteLine();
 				}
+				
+				w.WriteLine("return services;");
 			});
 		});
 
