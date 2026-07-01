@@ -16,7 +16,7 @@ namespace ConfigBinder;
 [Generator(LanguageNames.CSharp)]
 public sealed class BindConfigGenerator : IIncrementalGenerator
 {
-	private const string FullAttributeName = $"{AttributeSources.AttributesNamespace}.{AttributeSources.ConfigSectionAttribute}";
+	private const string FullAttributeName = $"{AttributeSources.AttributesNamespace}.{nameof(AttributeSources.ConfigSectionAttribute)}";
 	private const string ValidationTargetFqn = "Immediate.Validations.Shared.IValidationTarget`1";
 
 	public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -225,7 +225,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			SpecialType.System_Decimal => ParseKind.Decimal,
 			SpecialType.System_Char => ParseKind.Char,
 			_ when type.TypeKind == TypeKind.Enum => ParseKind.Enum,
-			_ => ParseKind.IParsable,
+			_ => ParseKind.Parsable,
 		};
 	}
 
@@ -247,13 +247,13 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				$"{nameof(RuntimeHelpersSources.ImmediateValidationOptionsValidator)}.g.cs",
 				SourceText.From(RuntimeHelpersSources.ImmediateValidationOptionsValidator, Encoding.UTF8));
 		}
-		
+
 		foreach (var model in models)
 		{
 			ctx.CancellationToken.ThrowIfCancellationRequested();
 
 			ctx.AddSource(
-				$"ConfigBinder.{model.SafeName}.g.cs", 
+				$"ConfigBinder.{model.SafeName}.g.cs",
 				SourceText.From(EmitBinder(model, globalConverters), Encoding.UTF8));
 		}
 
@@ -297,25 +297,25 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			var kinds = model.Properties.Select(p => p.ParseKind).ToImmutableHashSet();
 			EmitParseHelpers(w, kinds);
 		});
-		
+
 		return w.ToString();
 	}
 
 	private static void EmitPropertyAssignment(IndentedWriter w, PropertyModel prop, ConverterRef? converter)
 	{
-		var raw = $"""section["{prop.Name}]""";
+		var raw = $"""section["{prop.Name}"]""";
 
 		if (prop is { IsNullable: true, IsRequired: false })
 		{
 			var guard = $"_v_{prop.Name}";
-			w.WriteLine($"{prop.Name} = {raw} is string {guard} && !string.IsNullOrEmpty({raw})");
+			w.WriteLine($"{prop.Name} = {raw} is string {guard} && !string.IsNullOrEmpty({guard})");
 			w.Indented(() => {
 				w.Write("? ");
 				var call = converter is not null
 					? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({guard}, "{prop.Name}")"""
 					: BuildParseCall(prop, guard);
 				w.WriteLine(call);
-				w.WriteLine(" : default;");
+				w.WriteLine(" : default,");
 			});
 		}
 		else
@@ -324,13 +324,14 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			var call = converter is not null
 				? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({raw}, "{prop.Name}")"""
 				: BuildParseCall(prop, raw);
-			w.WriteLine(call);
+			w.WriteLine($"{call},");
 		}
 	}
 
 	private static string BuildParseCall(PropertyModel prop, string varExpr) =>
 		prop.ParseKind switch
 		{
+			ParseKind.String when prop.IsRequired || !prop.IsNullable => $"""ValidateString({varExpr}, "{prop.Name}")""",
 			ParseKind.String => varExpr,
 			ParseKind.Bool => $"""ParseBool({varExpr}, "{prop.Name}")""",
 			ParseKind.Byte => $"""ParseByte({varExpr}, "{prop.Name}")""",
@@ -374,6 +375,20 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		w.WriteLine("// Built-in reflection-free parser helpers");
 		w.WriteLine();
 
+		if (set.Contains(ParseKind.String))
+		{
+			w.WriteLine( // lang=cs
+				"""
+				private static string ValidateString(string? value, string propertyName)
+				{
+					if (string.IsNullOrEmpty(value))
+				    {
+						throw Required(propertyName);
+				    }
+					return value;
+				}
+				""");
+		}
 		if (set.Contains(ParseKind.Bool))
 		{
 			w.WriteLine( // lang=cs
@@ -407,7 +422,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				     	return value[0];   
 				    }
 				    throw BadValue(propertyName, value, "Char");
-				      }
+				}
 				""");
 		}
 		if (set.Contains(ParseKind.Enum))
@@ -425,14 +440,14 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				     	return e;   
 				    }
 				    throw BadValue(propertyName, value, typeof(TEnum).Name);
-				      }
+				}
 				""");
 		}
-		if (set.Contains(ParseKind.IParsable))
+		if (set.Contains(ParseKind.Parsable))
 		{
 			w.WriteLine( // lang=cs
 				"""
-				private static T ParseIParsable<T>(string? value, string propertyName) where T : IParsable
+				private static T ParseIParsable<T>(string? value, string propertyName) where T : IParsable<T>
 				{
 					if (string.IsNullOrEmpty(value))
 				    {
@@ -442,24 +457,27 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				    {
 				     	return t;   
 				    }
-				    	throw BadValue(propertyName, value, typeof(T).Name);
-				    }
+				    throw BadValue(propertyName, value, typeof(T).Name);
+				}
 				""");
 		}
-		foreach (var (kind, name, style) in new[]
-		         {
-			         (ParseKind.Byte, "byte", "NumberStyles.Integer"),
-			         (ParseKind.SByte, "sbyte", "NumberStyles.Integer"),
-			         (ParseKind.Short, "short", "NumberStyles.Integer"),
-			         (ParseKind.UShort, "ushort", "NumberStyles.Integer"),
-			         (ParseKind.Int, "int", "NumberStyles.Integer"),
-			         (ParseKind.UInt, "uint", "NumberStyles.Integer"),
-			         (ParseKind.Long, "long", "NumberStyles.Integer"),
-			         (ParseKind.ULong, "ulong", "NumberStyles.Integer"),
-			         (ParseKind.Float, "float", "NumberStyles.Float"),
-			         (ParseKind.Double, "double", "NumberStyles.Float"),
-			         (ParseKind.Decimal, "decimal", "NumberStyles.Number"),
-		         })
+
+		var numerics = new[]
+		{
+			(ParseKind.Byte, "byte", "Integer"),
+			(ParseKind.SByte, "sbyte", "Integer"),
+			(ParseKind.Short, "short", "Integer"),
+			(ParseKind.UShort, "ushort", "Integer"),
+			(ParseKind.Int, "int", "Integer"),
+			(ParseKind.UInt, "uint", "Integer"),
+			(ParseKind.Long, "long", "Integer"),
+			(ParseKind.ULong, "ulong", "Integer"),
+			(ParseKind.Float, "float", "Float"),
+			(ParseKind.Double, "double", "Float"),
+			(ParseKind.Decimal, "decimal", "Number"),
+		};
+		
+		foreach (var (kind, name, style) in numerics)
 		{
 			if (!set.Contains(kind))
 			{
@@ -472,16 +490,15 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				$$"""
 				  private static {{name}} Parse{{capitalized}}(string? value, string propertyName)
 				  {
-				              	  if (string.IsNullOrEmpty(value))
+				      if (string.IsNullOrEmpty(value))
 				      {
 				          throw Required(propertyName);
 				      }
-				      if ({{name}}.TryParse(value, NumberStyles.{{style}}, global::System.Globalization.CultureInfo.InvariantCulture, out var n))
+				      if ({{name}}.TryParse(value, global::System.Globalization.NumberStyles.{{style}}, global::System.Globalization.CultureInfo.InvariantCulture, out var n))
 				      {
 				       	return n;   
 				      }
-				      	throw BadValue(propertyName, value, "{{name}}");
-				      }
+				      throw BadValue(propertyName, value, "{{name}}");
 				  }
 				  """);
 		}
@@ -490,10 +507,10 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		w.WriteLine( // lang=cs
 			"""
 			private static InvalidOperationException Required(string key) =>
-			          new($"Required configuration key '{key}' is missing or empty");
+				new($"Required configuration key '{key}' is missing or empty");
 			      
-			      private static InvalidOperationException BadValue(string key, string? value, string type) =>
-			          new($"Configuration key '{key}' value '{value}' cannot be parsed as '{type}'");
+			private static InvalidOperationException BadValue(string key, string? value, string type) =>
+				new($"Configuration key '{key}' value '{value}' cannot be parsed as '{type}'");
 			""");
 	}
 
@@ -504,7 +521,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		w.WriteLine(SharedSources.Header);
 		w.WriteLine("#nullable enable");
 		w.WriteLine();
-		w.WriteLine("namespace ConfigBinder");
+		w.WriteLine("namespace ConfigBinder;");
 		w.WriteLine();
 		w.WriteLine("public static class GeneratedConfigRegistration");
 		w.BodyBlock(() => {
@@ -529,7 +546,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 					}
 					w.WriteLine();
 				}
-				
+
 				w.WriteLine("return services;");
 			});
 		});
@@ -543,19 +560,19 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			? $"{model.Namespace}.{model.SafeName}ConfigBinder"
 			: $"{model.SafeName}ConfigBinder";
 
-		w.WriteLine($"services.AddSingleton({binder}.Bind(configuration)");
+		w.WriteLine($"services.AddSingleton({binder}.Bind(configuration));");
 	}
-	
+
 	private static void EmitOptionsRegistration(IndentedWriter w, ConfigModel model)
 	{
 		var binder = model.Namespace is not null
 			? $"{model.Namespace}.{model.SafeName}ConfigBinder"
 			: $"{model.SafeName}ConfigBinder";
-		
-		w.WriteLine($"services.AddOptions<{model.FullyQualifiedName}Options>()");
-		w.WriteLine("services.AddSingleton<global::Microsoft.Extensions.Options.IOptionsFactory<{model.FullyQualifiedName}>>(sp => ");
+
+		w.WriteLine($"services.AddOptions<{model.FullyQualifiedName}>();");
+		w.WriteLine($"services.AddSingleton<global::Microsoft.Extensions.Options.IOptionsFactory<{model.FullyQualifiedName}>>(sp => ");
 		w.Indented(() => {
-			w.WriteLine($"new global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{RuntimeHelpersSources.ConfigBinderOptionsFactory}<{model.FullyQualifiedName}>");
+			w.WriteLine($"new global::{RuntimeHelpersSources.RuntimeHelpersNamespace}.{RuntimeHelpersSources.ConfigBinderOptionsFactory}<{model.FullyQualifiedName}>(");
 			w.Indented(() => {
 				w.WriteLine($"sp.GetRequiredService<global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IConfigureOptions<{model.FullyQualifiedName}>>>(),");
 				w.WriteLine($"sp.GetRequiredService<global::System.Collections.Generic.IEnumerable<global::Microsoft.Extensions.Options.IPostConfigureOptions<{model.FullyQualifiedName}>>>(),");

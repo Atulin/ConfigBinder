@@ -17,7 +17,7 @@ internal enum ParseKind
 	Decimal,
 	Char,
 	Enum,
-	IParsable
+	Parsable,
 }
 
 internal sealed record PropertyModel(

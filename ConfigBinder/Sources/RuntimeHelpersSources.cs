@@ -44,7 +44,7 @@ public static class RuntimeHelpersSources
 		      {
 		          var errors = T.Validate(options);
 
-		          if (errors is not { Count: > 0 })
+		          if (errors.TryGetNonEnumeratedCount(out var c) && c <= 0)
 		          {
 		              return global::Microsoft.Extensions.Options.ValidateOptionsResult.Skip;
 		  		  }
