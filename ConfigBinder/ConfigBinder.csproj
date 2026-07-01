@@ -6,7 +6,7 @@
         <Nullable>enable</Nullable>
         
         <PackageId>Atulin.ConfigBinder</PackageId>
-        <PackageVersion>0.2.2</PackageVersion>
+        <PackageVersion>0.3.0</PackageVersion>
         <Title>ConfigBinder</Title>
         <Description>Reflection-free configuration binder and validator powered by Source Generators.</Description>
         <Authors>Atulin</Authors>
@@ -25,6 +25,13 @@
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     </PropertyGroup>
 
+    <PropertyGroup>
+         <MeziantouPolyfill_IncludedPolyfills>
+             T:System.Diagnostics.CodeAnalysis.NotNullWhenAttribute;
+             T:System.Runtime.CompilerServices.IsExternalInit;
+         </MeziantouPolyfill_IncludedPolyfills> 
+    </PropertyGroup>
+
     <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
         <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
@@ -32,6 +39,10 @@
     
     <ItemGroup>
       <PackageReference Include="AssemblyMetadata.Generators" Version="2.2.0">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+      <PackageReference Include="Meziantou.Polyfill" Version="1.0.156">
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>

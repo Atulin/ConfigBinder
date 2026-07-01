@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -183,13 +185,18 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
 			var propType = member.Type;
 
-			properties.Add(new(
+			var isDict = IsStringDictionaryType(propType, out var dictValueType);
+			
+			properties.Add(new PropertyModel(
 				Name: member.Name,
 				TypeFqn: propType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
 				IsNullable: propType.NullableAnnotation == NullableAnnotation.Annotated,
 				IsRequired: member.IsRequired,
 				ParseKind: ClassifyParseKind(propType),
-				PerPropConverter: propConverter));
+				PerPropConverter: propConverter,
+				DictValueTypeFqn: isDict ? dictValueType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : null,
+				DictValueTypeParseKind: isDict ? ClassifyParseKind(dictValueType!) : null
+			));
 
 		}
 
@@ -230,8 +237,31 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			SpecialType.System_Decimal => ParseKind.Decimal,
 			SpecialType.System_Char => ParseKind.Char,
 			_ when type.TypeKind == TypeKind.Enum => ParseKind.Enum,
+			_ when IsStringDictionaryType(type, out _) => ParseKind.Dictionary,
 			_ => ParseKind.Parsable,
 		};
+	}
+
+	private static bool IsStringDictionaryType(ITypeSymbol type, [NotNullWhen(true)]out ITypeSymbol? valueType)
+	{
+		if (type is not INamedTypeSymbol { IsGenericType: true } named)
+		{
+			valueType = null;
+			return false;
+		}
+
+		if (named.TypeArguments is [{ SpecialType: SpecialType.System_String }, var kt]
+		    && (named.OriginalDefinition.Equals("System", "Collections", "Generic", "Dictionary")
+		        || named.OriginalDefinition.Equals("System", "Collections", "Generic", "IDictionary")
+		        || named.OriginalDefinition.Equals("System", "Collections", "Generic", "IReadOnlyDictionary"))
+		   )
+		{
+			valueType = kt;
+			return true;
+		}
+
+		valueType = null;
+		return false;
 	}
 
 	private static void Emit(
@@ -309,37 +339,91 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				w.WriteLine("return instance;");
 			});
 			w.WriteLine();
-			var kinds = model.Properties.Select(p => p.ParseKind).ToImmutableHashSet();
-			EmitParseHelpers(w, kinds);
+			
+			var kinds = model.Properties
+				.Select(p => p.ParseKind)
+				.ToImmutableHashSet();
+			
+			var dictKinds = model.Properties
+				.Select(p => p.DictValueTypeParseKind)
+				.OfType<ParseKind>()
+				.ToImmutableHashSet();
+			
+			EmitParseHelpers(w, [..kinds, ..dictKinds]);
+
+			foreach (var prop in model.Properties.Where(p => p is { DictValueTypeFqn: not null, DictValueTypeParseKind: not null }))
+			{
+				w.WriteLine();
+				EmitDictionaryBuilder(w, prop);
+			}
 		});
 
 		return w.ToString();
+	}
+
+	private static void EmitDictionaryBuilder(IndentedWriter w, PropertyModel prop)
+	{
+		if (prop.DictValueTypeFqn is null || prop.DictValueTypeParseKind is not {} dvtpk)
+		{
+			w.WriteLine($"// Dictionary builder not available for property {prop.Name} of type {prop.TypeFqn} (no dictionary value type) - skipping");
+			return;
+		}
+		var parseCall = BuildParseCall(prop with { TypeFqn = prop.DictValueTypeFqn, ParseKind = dvtpk }, "entry.Value");
+		
+		w.Write("private static global::System.Collections.Generic.Dictionary<string, ");
+		w.Write(prop.DictValueTypeFqn);
+		w.WriteLine($"> Build{prop.Name}Dictionary(global::Microsoft.Extensions.Configuration.IConfigurationSection section)");
+		w.BodyBlock(() => {
+			w.WriteLine($"""var dictSection = section.GetSection("{prop.Name}");""");
+			w.WriteLine($"var dict = new global::System.Collections.Generic.Dictionary<string, {prop.DictValueTypeFqn}>();");
+			w.WriteLine("foreach (var entry in dictSection.GetChildren())");
+			w.BodyBlock(() => {
+				w.WriteLine($"dict[entry.Key] = {parseCall};");
+			});
+			w.WriteLine("return dict;");
+		});
 	}
 
 	private static void EmitPropertyAssignment(IndentedWriter w, PropertyModel prop, PropConverterRef? converter)
 	{
 		var raw = $"""section["{prop.Name}"]""";
 
-		if (prop is { IsNullable: true, IsRequired: false })
+		w.WriteLine($"// {prop}");
+		
+		switch (prop)
 		{
-			var guard = $"_v_{prop.Name}";
-			w.WriteLine($"{prop.Name} = {raw} is string {guard} && !string.IsNullOrEmpty({guard})");
-			w.Indented(() => {
-				w.Write("? ");
+			case { IsNullable: true, IsRequired: false, DictValueTypeFqn: null }:
+			{
+				var guard = $"_v_{prop.Name}";
+				w.WriteLine($"{prop.Name} = {raw} is string {guard} && !string.IsNullOrEmpty({guard})");
+				w.Indented(() => {
+					w.Write("? ");
+					var call = converter is not null
+						? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({guard}, "{prop.Name}")"""
+						: BuildParseCall(prop, guard);
+					w.WriteLine(call);
+					w.WriteLine(" : default,");
+				});
+				break;
+			}
+			case { DictValueTypeFqn: not null }:
+			{
+				w.Write($"{prop.Name} = ");
 				var call = converter is not null
-					? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({guard}, "{prop.Name}")"""
-					: BuildParseCall(prop, guard);
-				w.WriteLine(call);
-				w.WriteLine(" : default,");
-			});
-		}
-		else
-		{
-			w.Write($"{prop.Name} = ");
-			var call = converter is not null
-				? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({raw}, "{prop.Name}")"""
-				: BuildParseCall(prop, raw);
-			w.WriteLine($"{call},");
+					? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({raw}, "{prop.Name}")"""
+					: $"Build{prop.Name}Dictionary(section)";
+				w.WriteLine($"{call},");
+				break;
+			}
+			default:
+			{
+				w.Write($"{prop.Name} = ");
+				var call = converter is not null
+					? $"""global::{converter.ConverterTypeFqn}.{converter.MethodName}({raw}, "{prop.Name}")"""
+					: BuildParseCall(prop, raw);
+				w.WriteLine($"{call},");
+				break;
+			}
 		}
 	}
 
@@ -382,10 +466,6 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 	private static void EmitParseHelpers(IndentedWriter w, IEnumerable<ParseKind> kinds)
 	{
 		var set = new HashSet<ParseKind>(kinds);
-		if (set.All(k => k == ParseKind.String))
-		{
-			return;
-		}
 
 		w.WriteLine("// Built-in reflection-free parser helpers");
 		w.WriteLine();

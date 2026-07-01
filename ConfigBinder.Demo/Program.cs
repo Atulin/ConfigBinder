@@ -12,6 +12,9 @@ builder.Configuration["SomeConfig:SomeInt"] = "42";
 builder.Configuration["Validated:Name"] = "Validated Config";
 builder.Configuration["Validated:Weight"] = "67.69";
 builder.Configuration["Validated:BuildDate"] = "2026-07-01 04:07:11";
+builder.Configuration["Validated:Values:Key1"] = "1";
+builder.Configuration["Validated:Values:Key2"] = "2";
+builder.Configuration["Validated:Values:Key3"] = "3";
 
 builder.Services.Replace(ServiceDescriptor.Singleton(() => new SomeConfig{ SomeString = "", SomeInt = 0 }));
 
@@ -42,4 +45,5 @@ internal sealed partial class ValidatedConfig : IValidationTarget<ValidatedConfi
 	public required string Name { get; init; }
 	public required float Weight { get; init; }
 	public required DateTime BuildDate { get; init; }
+	public required Dictionary<string, int> Values { get; init; }
 }

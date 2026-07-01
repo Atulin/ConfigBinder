@@ -18,6 +18,7 @@ internal enum ParseKind
 	Char,
 	Enum,
 	Parsable,
+	Dictionary,
 }
 
 internal sealed record PropertyModel(
@@ -26,4 +27,6 @@ internal sealed record PropertyModel(
 	bool IsNullable,
 	bool IsRequired,
 	ParseKind ParseKind,
-	PropConverterRef? PerPropConverter);
+	PropConverterRef? PerPropConverter,
+	ParseKind? DictValueTypeParseKind = null,
+	string? DictValueTypeFqn = null);
