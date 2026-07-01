@@ -1,15 +1,16 @@
 ﻿using ConfigBinder.Helpers;
 
-namespace ConfigBinder;
+namespace ConfigBinder.Models;
 
 internal sealed record ConfigModel(
-	string FullyQualifiedName,
-	string Namespace,
-	string Visibility,
+	string? Namespace,
 	string TypeName,
+	string FullyQualifiedName,
 	string SectionName,
-	EquatableReadOnlyList<string> Properties,
-	EquatableReadOnlyList<string> RequiredProperties)
+	EquatableReadOnlyList<PropertyModel> Properties,
+	bool ImplementsIValidationTarget,
+	RegistrationMode? ModeOverride
+	)
 {
 	public string SafeName => FullyQualifiedName
 		.Replace("global::", "")
