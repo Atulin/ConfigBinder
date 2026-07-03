@@ -26,6 +26,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		context.RegisterPostInitializationOutput(static ctx => ctx
 			.RegisterStatic($"{nameof(AttributeSources.ConfigRegistrationMode)}.g.cs", AttributeSources.ConfigRegistrationMode)
 			.RegisterStatic($"{nameof(AttributeSources.ConfigSectionAttribute)}.g.cs", AttributeSources.ConfigSectionAttribute)
+			.RegisterStatic($"{nameof(AttributeSources.ConfigKeyNameAttribute)}.g.cs", AttributeSources.ConfigKeyNameAttribute)
 			.RegisterStatic($"{nameof(AttributeSources.ConfigSectionDefaultsAttribute)}.g.cs", AttributeSources.ConfigSectionDefaultsAttribute)
 			.RegisterStatic($"{nameof(AttributeSources.ConfigConverterAttribute)}.g.cs", AttributeSources.ConfigConverterAttribute)
 			.RegisterStatic($"{nameof(AttributeSources.ConfigTypeConverterAttribute)}.g.cs", AttributeSources.ConfigTypeConverterAttribute)
@@ -183,12 +184,20 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				}
 			}
 
+			var keyNameAttr = member
+				.GetAttributes()
+				.FirstOrDefault(a => a.AttributeClass.Equals(SharedSources.BaseNamespace, AttributeSources.Namespace, nameof(AttributeSources.ConfigKeyNameAttribute)));
+			var keyName = keyNameAttr is { ConstructorArguments: [{ Value: string kn }] }
+				? kn
+				: member.Name;
+
 			var propType = member.Type;
 
 			var isDict = IsStringDictionaryType(propType, out var dictValueType);
-			
+
 			properties.Add(new PropertyModel(
 				Name: member.Name,
+				KeyName: keyName,
 				TypeFqn: propType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
 				IsNullable: propType.NullableAnnotation == NullableAnnotation.Annotated,
 				IsRequired: member.IsRequired,
@@ -242,7 +251,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 		};
 	}
 
-	private static bool IsStringDictionaryType(ITypeSymbol type, [NotNullWhen(true)]out ITypeSymbol? valueType)
+	private static bool IsStringDictionaryType(ITypeSymbol type, [NotNullWhen(true)] out ITypeSymbol? valueType)
 	{
 		if (type is not INamedTypeSymbol { IsGenericType: true } named)
 		{
@@ -339,16 +348,16 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 				w.WriteLine("return instance;");
 			});
 			w.WriteLine();
-			
+
 			var kinds = model.Properties
 				.Select(p => p.ParseKind)
 				.ToImmutableHashSet();
-			
+
 			var dictKinds = model.Properties
 				.Select(p => p.DictValueTypeParseKind)
 				.OfType<ParseKind>()
 				.ToImmutableHashSet();
-			
+
 			EmitParseHelpers(w, [..kinds, ..dictKinds]);
 
 			foreach (var prop in model.Properties.Where(p => p is { DictValueTypeFqn: not null, DictValueTypeParseKind: not null }))
@@ -369,7 +378,7 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 			return;
 		}
 		var parseCall = BuildParseCall(prop with { TypeFqn = prop.DictValueTypeFqn, ParseKind = dvtpk }, "entry.Value");
-		
+
 		w.Write("private static global::System.Collections.Generic.Dictionary<string, ");
 		w.Write(prop.DictValueTypeFqn);
 		w.WriteLine($"> Build{prop.Name}Dictionary(global::Microsoft.Extensions.Configuration.IConfigurationSection section)");
@@ -386,10 +395,10 @@ public sealed class BindConfigGenerator : IIncrementalGenerator
 
 	private static void EmitPropertyAssignment(IndentedWriter w, PropertyModel prop, PropConverterRef? converter)
 	{
-		var raw = $"""section["{prop.Name}"]""";
+		var raw = $"""section["{prop.KeyName}"]""";
 
 		w.WriteLine($"// {prop}");
-		
+
 		switch (prop)
 		{
 			case { IsNullable: true, IsRequired: false, DictValueTypeFqn: null }:

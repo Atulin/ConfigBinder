@@ -56,6 +56,25 @@ public static class AttributeSources
 		      public ConfigRegistrationMode Mode { get; set; } = ConfigRegistrationMode.Options;
 		  }
 		  """;
+
+	public const string ConfigKeyNameAttribute = // lang=cs
+		$$"""
+		  {{SharedSources.Header}}
+		  #nullable enable
+
+		  namespace {{AttributesNamespace}};
+
+		  /// <summary>
+		  /// Allows a property to be bound to a different key name than the property name.
+		  /// </summary>
+		  [global::System.AttributeUsage(
+		      global::System.AttributeTargets.Property,
+		      Inherited = false)]
+		  public sealed class {{nameof(ConfigKeyNameAttribute)}}(string keyName) : global::System.Attribute
+		  {
+		      public string KeyName { get; } = keyName;
+		  }
+		  """;
 	
 	public const string ConfigConverterAttribute = // lang=cs
 		$$"""

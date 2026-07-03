@@ -23,6 +23,7 @@ internal enum ParseKind
 
 internal sealed record PropertyModel(
 	string Name,
+	string KeyName,
 	string TypeFqn,
 	bool IsNullable,
 	bool IsRequired,
